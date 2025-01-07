@@ -126,6 +126,16 @@ public class LeanSteerSettings
     public float speedInfluenceFactor = 0.5f;
 }
 
+    // Angular Velocity and Power calculation variables
+    private float wheelAngularVelocity;
+    private float engineAngularVelocity;
+    private float currentPower;
+    private float currentTorque;
+        [Header("Power and Torque Settings")]
+    [SerializeField] private float maxEnginePower = 15063f; // Maximum power in watts (about 67 HP)
+    [SerializeField] private float maxEngineTorque = 27f;   // Maximum torque in Nm
+    [SerializeField] private float drivetrainEfficiency = 0.9f;
+
 
 
 
@@ -180,27 +190,27 @@ public class LeanSteerSettings
         List<Keyframe> keyframes = new List<Keyframe>
         {
             // Initial range (2000-2500 RPM)
-            new Keyframe(2000f/MAX_RPM, 7.0f),
-            new Keyframe(2250f/MAX_RPM, 18.0f),
-            new Keyframe(2500f/MAX_RPM, 28.0f),
+            new Keyframe(2000f, 7.0f),
+            new Keyframe(2250f, 18.0f),
+            new Keyframe(2500f, 28.0f),
             
             // Mid range climbing (2500-3500 RPM)
-            new Keyframe(2750f/MAX_RPM, 28.3f),
-            new Keyframe(3000f/MAX_RPM, 28.5f),
-            new Keyframe(3250f/MAX_RPM, 28.8f),
-            new Keyframe(3500f/MAX_RPM, 29.2f),
+            new Keyframe(2750f, 28.3f),
+            new Keyframe(3000f, 28.5f),
+            new Keyframe(3250f, 28.8f),
+            new Keyframe(3500f, 29.2f),
             
             // Peak torque range (3500-4000 RPM)
-            new Keyframe(3750f/MAX_RPM, 29.5f),
-            new Keyframe(4000f/MAX_RPM, 29.85f),
+            new Keyframe(3750f, 29.5f),
+            new Keyframe(4000f, 29.85f),
             
             // High RPM decline (4000-5500 RPM)
-            new Keyframe(4250f/MAX_RPM, 29.4f),
-            new Keyframe(4500f/MAX_RPM, 29.0f),
-            new Keyframe(4750f/MAX_RPM, 27.5f),
-            new Keyframe(5000f/MAX_RPM, 25.0f),
-            new Keyframe(5250f/MAX_RPM, 22.5f),
-            new Keyframe(5500f/MAX_RPM, 20.0f)
+            new Keyframe(4250f, 29.4f),
+            new Keyframe(4500f, 29.0f),
+            new Keyframe(4750f, 27.5f),
+            new Keyframe(5000f, 25.0f),
+            new Keyframe(5250f, 22.5f),
+            new Keyframe(5500f, 20.0f)
         };
 
         enginetorque = new AnimationCurve(keyframes.ToArray());
@@ -218,14 +228,23 @@ public class LeanSteerSettings
         
     }
      void FixedUpdate() {
+        float speed = GetVehicleSpeed();
+    float maxSpeedCurrentGear = gearRatios[currentGear - 1].maxSpeed;
 
-    // Apply the acceleration to the bike
-    UpdateRPM();
-    HandleGearShifting();
-    setAcceleration();
-    // HandleSteering();
-    // LayOnTurn();
-    brake();
+        // Apply the acceleration to the bike
+        if (speed < maxSpeedCurrentGear)
+        {
+            UpdateRPM();
+            HandleGearShifting();
+            setAcceleration();
+        }
+        else
+        {
+            HandleGearShifting();
+        }
+        // HandleSteering();
+        // LayOnTurn();
+        brake();
     UpdateVisuals();
     UpdateLeanAndSteer();   
   
@@ -247,7 +266,7 @@ public class LeanSteerSettings
         //         break;
         //     }
             
-        // }
+        //  }
             // Manual gear up
     if (Input.GetKeyDown(KeyCode.E))
     {
@@ -258,9 +277,9 @@ public class LeanSteerSettings
     }
     
     // Manual gear down
-    if (Input.GetKeyDown(KeyCode.Q) && currentGear > 1)
+    if (Input.GetKeyDown(KeyCode.Q))
     {
-        if (speed <= gearRatios[currentGear - 2].maxSpeed)
+        if (speed <= gearRatios[currentGear - 1].maxSpeed)
         {
             StartGearShift(currentGear - 1);
         }
@@ -333,6 +352,11 @@ public class LeanSteerSettings
         // float currentTorque = enginetorque.Evaluate(normalizedRPM) * getThrottleInput();
         //  float force = mass * value ;
         //  float torque = force * rearWheel.radius;
+
+        // Calculate wheel angular velocity (rad/s)
+        wheelAngularVelocity = rearWheel.rpm * (2f * Mathf.PI / 60f);
+
+
          float normalizedRPM = currentRPM / MAX_RPM;
         float baseTorque = enginetorque.Evaluate(normalizedRPM);
         float speed = GetVehicleSpeed();
@@ -340,15 +364,28 @@ public class LeanSteerSettings
         // Apply gear ratio and clutch engagement
         float gearRatio = gearRatios[currentGear - 1].ratio;
         float totalRatio = gearRatio * FINAL_DRIVE_RATIO;
-        float finalTorque = baseTorque * totalRatio * clutchEngagement * getThrottleInput();
+        engineAngularVelocity = wheelAngularVelocity * totalRatio;
 
-
-        if (speed < gearRatios[currentGear].ratio){
-             rearWheel.motorTorque = finalTorque;
-        }
-
-
-          
+        currentPower = baseTorque * engineAngularVelocity;
+        float maxTorqueAtRPM = Mathf.Min(
+            baseTorque,
+            (maxEnginePower / Mathf.Max(engineAngularVelocity, 0.1f))
+        );
+        float availableTorque = maxTorqueAtRPM * totalRatio * drivetrainEfficiency;
+        
+        // Apply throttle and clutch
+        float finalTorque = availableTorque * getThrottleInput() * clutchEngagement;
+        // float finalTorque = baseTorque * totalRatio * clutchEngagement * getThrottleInput();
+        
+        rearWheel.motorTorque = finalTorque;
+        float force = finalTorque / rearWheel.radius;
+        Vector3 forceDir = transform.forward * force * getThrottleInput();
+        rb.AddRelativeForce(forceDir, ForceMode.Force);
+        
+        // Debug output
+        Debug.Log($"Engine RPM: {currentRPM:F0}");
+        Debug.Log($"Engine Power: {currentPower / 1000f:F2} kW");
+        Debug.Log($"Wheel Torque: {finalTorque:F2} Nm"); 
         // rb.AddRelativeForce(Vector3.left * rearWheel.motorTorque); 
         Debug.Log($"baseTorque:{baseTorque}");
         Debug.Log($"FinalTorque:{finalTorque}");
@@ -541,7 +578,7 @@ if (frontForkTransform != null)
         
         // Calculate average wheel speed in km/h
         float speed = 0f;
-        speed += rearWheel.rpm * rearWheel.radius * 2f * Mathf.PI * 60f / 1000f;
+        speed += frontWheel.rpm * frontWheel.radius * 2f * Mathf.PI * 60f / 1000f;
         
         return speed;
     }
@@ -556,10 +593,18 @@ if (frontForkTransform != null)
     // Debug information
     void OnGUI()
     {
-        GUI.Label(new Rect(10, 10, 200, 20), $"RPM: {currentRPM:F0}");
-        GUI.Label(new Rect(10, 30, 200, 20), $"Gear: {currentGear}");
-        GUI.Label(new Rect(10, 50, 200, 20), $"Speed: {GetVehicleSpeed():F1} km/h");
-        GUI.Label(new Rect(10, 70, 200, 20), $"Power: {GetCurrentPower():F1} hp");
+        // GUI.Label(new Rect(10, 10, 200, 20), $"RPM: {currentRPM:F0}");
+        // GUI.Label(new Rect(10, 30, 200, 20), $"Gear: {currentGear}");
+        // GUI.Label(new Rect(10, 50, 200, 20), $"Speed: {GetVehicleSpeed():F1} km/h");
+        // GUI.Label(new Rect(10, 70, 200, 20), $"Power: {GetCurrentPower():F1} hp");
+                GUILayout.BeginArea(new Rect(10, 10, 300, 200));
+        GUILayout.Label($"Speed: {GetVehicleSpeed():F1} km/h");
+        GUILayout.Label($"RPM: {currentRPM:F0}");
+        GUILayout.Label($"Gear: {currentGear}");
+        GUILayout.Label($"Engine Power: {currentPower / 1000f:F2} kW");
+        GUILayout.Label($"Engine Torque: {currentTorque:F2} Nm");
+        GUILayout.Label($"Wheel Angular Velocity: {wheelAngularVelocity:F2} rad/s");
+        GUILayout.EndArea();
     }
       
 }

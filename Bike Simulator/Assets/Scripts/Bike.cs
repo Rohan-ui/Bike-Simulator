@@ -33,7 +33,7 @@ public class Bike : MonoBehaviour
     [SerializeField]
     AnimationCurve enginetorque;
     [SerializeField]
-    public float engineRpm;
+   
     // [SerializeField]
     // public float gearRation[] ={2f, 1.7f, 1.3f, 0.9f, 0.5f};
 
@@ -229,25 +229,28 @@ public class LeanSteerSettings
     }
      void FixedUpdate() {
         float speed = GetVehicleSpeed();
-    float maxSpeedCurrentGear = gearRatios[currentGear - 1].maxSpeed;
+        float maxSpeedCurrentGear = gearRatios[currentGear - 1].maxSpeed;
+        float torque = GetCurrentPower();
+        bool front = frontWheel;
+        bool rear = rearWheel;
+        Debug.Log(torque);
 
+        if (front == frontWheel.isGrounded && rear == rearWheel.isGrounded){
         // Apply the acceleration to the bike
         if (speed < maxSpeedCurrentGear)
         {
-            UpdateRPM();
-            HandleGearShifting();
             setAcceleration();
+            UpdateRPM();
+            
         }
-        else
-        {
-            HandleGearShifting();
-        }
+
         // HandleSteering();
         // LayOnTurn();
-        brake();
-    UpdateVisuals();
-    UpdateLeanAndSteer();   
-  
+            HandleGearShifting();
+            brake();
+            UpdateVisuals();
+            UpdateLeanAndSteer();   
+        }
     
 }  
     private void HandleGearShifting()
@@ -255,33 +258,37 @@ public class LeanSteerSettings
         float speed = GetVehicleSpeed();
         
         // Automatic gear shifting based on speed ranges
-        // for (int i = 0; i < gearRatios.Count; i++)
-        // {
-        //     if (speed >= gearRatios[i].minSpeed && speed <= gearRatios[i].maxSpeed)
-        //     {
-        //         if (currentGear != i + 1)
-        //         {
-        //             StartGearShift(i + 1);
-        //         }
-        //         break;
-        //     }
+        for (int i = 0; i < gearRatios.Count; i++)
+        {
+            if (speed >= gearRatios[i].minSpeed && speed <= gearRatios[i].maxSpeed)
+            {
+                if (currentGear != i + 1)
+                {
+                    StartGearShift(i + 1);
+                }
+                break;
+            }
             
-        //  }
+         }
             // Manual gear up
     if (Input.GetKeyDown(KeyCode.E))
     {
         if (speed >= gearRatios[currentGear].minSpeed)
         {
             StartGearShift(currentGear + 1);
+            value = 0f;
         }
     }
     
     // Manual gear down
-    if (Input.GetKeyDown(KeyCode.Q))
+    if (Input.GetKeyDown(KeyCode.Q) && speed >= gearRatios[currentGear -1].minSpeed)
     {
-        if (speed <= gearRatios[currentGear - 1].maxSpeed)
-        {
+        if(speed <= gearRatios[0].maxSpeed){
+            StartGearShift(currentGear);
+        }
+        else{
             StartGearShift(currentGear - 1);
+            value = 0f;
         }
     }
     }
@@ -311,12 +318,36 @@ public class LeanSteerSettings
         clutchEngagement = 1f;
     } 
 
+    // public float engineRpm(){
+    //     float engine_rpm = 1000f;
+    //     float rpmIncreaseRate = 300f;
+    //     float rpmDecreaseRate = 200f;
+    //     float time = Time.fixedDeltaTime;
+    //     float throttle = getThrottleInput();
+    //     if(throttle > 0f){
+    //         engine_rpm += rpmIncreaseRate * throttle * time;
+    //         if (engine_rpm > MAX_RPM){
+    //             engine_rpm = MAX_RPM;
+    //         }
+    //     else{
+    //         engine_rpm -= rpmDecreaseRate * time;
+    //     }
+
+    //     if(engine_rpm< IDLE_RPM){
+    //         engine_rpm = IDLE_RPM;
+    //     }
+    //     }
+    //     return engine_rpm;
+    // }
+
         private void UpdateRPM()
     {
         
         // Calculate average wheel RPM
         float wheelRPM =0f;
         wheelRPM = rearWheel.rpm;
+
+        // float engineRPM = engineRpm();
         
         // Convert wheel RPM to engine RPM through current gear ratio
         float gearRatio = gearRatios[currentGear - 1].ratio;
@@ -330,7 +361,7 @@ public class LeanSteerSettings
         if (throttle > 0.1f)
         {
             targetRPM = Mathf.Max(targetRPM, IDLE_RPM);
-            currentRPM = Mathf.Lerp(currentRPM, targetRPM, Time.fixedDeltaTime * 2f);
+            currentRPM = Mathf.Lerp(currentRPM, targetRPM, Time.fixedDeltaTime);
         }
         else
         {
@@ -381,6 +412,7 @@ public class LeanSteerSettings
         float force = finalTorque / rearWheel.radius;
         Vector3 forceDir = transform.forward * force * getThrottleInput();
         rb.AddRelativeForce(forceDir, ForceMode.Force);
+        currentTorque = finalTorque;
         
         // Debug output
         Debug.Log($"Engine RPM: {currentRPM:F0}");
@@ -390,7 +422,21 @@ public class LeanSteerSettings
         Debug.Log($"baseTorque:{baseTorque}");
         Debug.Log($"FinalTorque:{finalTorque}");
     }
-public float getThrottleInput() => value;
+public float getThrottleInput(){
+    if(Input.GetKey(KeyCode.L)){
+        value += 0.01f;
+        if(value > 1f){
+            value = 1f;
+        }
+    }
+    if(Input.GetKey(KeyCode.K)){
+        value -= 0.01f;
+        if(value < 0f){
+            value = 0f;
+        }
+    }
+    return value;
+}
 
 // public void setSteering(){
 //         frontWheel.steerAngle= maxSteer;
@@ -500,6 +546,7 @@ if (frontForkTransform != null)
         float speed = rb.linearVelocity.magnitude * 3.6f;// Convert to km/h
         float steerInput = leanValue;
         Debug.Log(speed);
+
         
         // Calculate target lean based on speed and steering input
         float maxLeanAtSpeed = settings.leanVsSpeedCurve.Evaluate(speed);
@@ -582,6 +629,24 @@ if (frontForkTransform != null)
         
         return speed;
     }
+         private float GetFrontSpeed()
+    {
+        
+        // Calculate average wheel speed in km/h
+        float speed = 0f;
+        speed += frontWheel.rpm;
+        
+        return speed;
+    }
+            private float GetRearSpeed()
+    {
+        
+        // Calculate average wheel speed in km/h
+        float speed = 0f;
+        speed += rearWheel.rpm;
+        
+        return speed;
+    }
     
     // Helper method to get current engine power
     public float GetCurrentPower()
@@ -597,7 +662,10 @@ if (frontForkTransform != null)
         // GUI.Label(new Rect(10, 30, 200, 20), $"Gear: {currentGear}");
         // GUI.Label(new Rect(10, 50, 200, 20), $"Speed: {GetVehicleSpeed():F1} km/h");
         // GUI.Label(new Rect(10, 70, 200, 20), $"Power: {GetCurrentPower():F1} hp");
+        GUI.contentColor = Color.black;
                 GUILayout.BeginArea(new Rect(10, 10, 300, 200));
+                GUILayout.Label($"RearWheelRpm: {GetFrontSpeed()}");
+                GUILayout.Label($"FrontWheelRpm: {GetFrontSpeed()}");
         GUILayout.Label($"Speed: {GetVehicleSpeed():F1} km/h");
         GUILayout.Label($"RPM: {currentRPM:F0}");
         GUILayout.Label($"Gear: {currentGear}");
